@@ -1,0 +1,34 @@
+# worker: fetch + process every 10 min (new GFS cycle every 6h, new radar every ~2 min)
+# tiles:  renders tiles from the published COGs
+# cache:  nginx in front of tiles; the only port exposed
+services:
+  worker:
+    build: .
+    restart: unless-stopped
+    environment:
+      WTP_FORECAST_HOURS: "0,6,12,18,24,36,48"
+    volumes: [data:/data]
+
+  tiles:
+    build: .
+    restart: unless-stopped
+    command: ["uvicorn", "pipeline.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    volumes: [data:/data:ro]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  cache:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [tiles]
+    ports: ["8080:80"]
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - tilecache:/var/cache/tiles
+
+volumes:
+  data:
+  tilecache:

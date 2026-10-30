@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather Tiles</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    --bg: #0e1116; --panel: rgba(18, 22, 29, 0.92); --line: #2a313c;
+    --text: #e6e9ee; --muted: #8b95a5; --accent: #5cc8ff; --bad: #ff6b6b; --ok: #6bd49a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #map { position: absolute; inset: 0; }
+  .panel { position: absolute; top: 16px; left: 16px; width: 300px; max-width: calc(100% - 32px);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+    backdrop-filter: blur(6px); z-index: 2; }
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .2px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .layers { display: grid; gap: 4px; margin-bottom: 12px; }
+  .layers button { all: unset; cursor: pointer; padding: 7px 10px; border-radius: 7px;
+    border: 1px solid var(--line); color: var(--text); font-size: 13px; }
+  .layers button[aria-pressed="true"] { border-color: var(--accent); background: rgba(92,200,255,.08); }
+  .layers button:disabled { opacity: .4; cursor: default; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .valid { font-variant-numeric: tabular-nums; font-size: 13px; }
+  .legend { margin-top: 12px; }
+  .bar { height: 10px; border-radius: 3px; border: 1px solid var(--line); }
+  .ticks { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 3px;
+    font-variant-numeric: tabular-nums; }
+  .meta { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted);
+    font-size: 11.5px; display: grid; gap: 2px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .toggle { all: unset; cursor: pointer; color: var(--muted); font-size: 12px; float: right; }
+  .panel.collapsed > :not(header) { display: none; }
+  @media (max-width: 480px) { .panel { top: 8px; left: 8px; right: 8px; width: auto; padding: 12px; } }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="panel" id="panel">
+  <header>
+    <button class="toggle" id="toggle" aria-label="Collapse panel">hide</button>
+    <h1>Weather Tiles</h1>
+    <div class="sub">NOAA GFS forecast + MRMS radar</div>
+  </header>
+  <div class="layers" id="layers"></div>
+  <div id="timeBox">
+    <label for="hour">Forecast hour <span id="hourLabel"></span></label>
+    <input id="hour" type="range" min="0" max="0" step="1" value="0">
+    <div class="valid" id="valid"></div>
+  </div>
+  <label for="opacity">Opacity</label>
+  <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.75">
+  <div class="legend">
+    <div class="bar" id="bar"></div>
+    <div class="ticks" id="ticks"></div>
+  </div>
+  <div class="meta" id="meta"></div>
+</div>
+<script>
+(async function () {
+  const manifest = await fetch("manifest.json", { cache: "no-cache" }).then(r => r.json());
+  const order = ["temp2m", "wind10m", "precip", "radar"];
+  const layerIds = order.filter(id => manifest.layers[id]);
+  let current = layerIds[0];
+  let hours = [];
+
+  const map = new maplibregl.Map({
+    container: "map",
+    center: [0, 25], zoom: 1.4, maxZoom: 9,
+    style: {
+      version: 8,
+      sources: {
+        base: { type: "raster", tileSize: 256,
+          tiles: ["https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png"],
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>' },
+        labels: { type: "raster", tileSize: 256,
+          tiles: ["https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png"] }
+      },
+      layers: [
+        { id: "base", type: "raster", source: "base" },
+        { id: "labels", type: "raster", source: "labels" }
+      ]
+    }
+  });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+
+  const $ = id => document.getElementById(id);
+  const fmtTime = d => d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+
+  function tileUrl(layer, hour) {
+    return new URL(manifest.tiles.replace("{layer}", layer).replace("{hour}", hour), location.href)
+      .href.replace(/%7B/g, "{").replace(/%7D/g, "}");
+  }
+
+  function show() {
+    const meta = manifest.layers[current];
+    hours = Object.keys(meta.hours).map(Number).sort((a, b) => a - b);
+    const slider = $("hour");
+    slider.max = hours.length - 1;
+    if (+slider.value > hours.length - 1) slider.value = hours.length - 1;
+    $("timeBox").style.display = current === "radar" ? "none" : "";
+    const hour = current === "radar" ? 0 : hours[+slider.value];
+
+    if (map.getLayer("wx")) map.removeLayer("wx");
+    if (map.getSource("wx")) map.removeSource("wx");
+    map.addSource("wx", {
+      type: "raster", tileSize: 256, tiles: [tileUrl(current, hour)],
+      maxzoom: manifest.tile_maxzoom, bounds: meta.bounds || [-180, -85.05, 180, 85.05],
+      attribution: "Data: NOAA GFS / MRMS"
+    });
+    map.addLayer({ id: "wx", type: "raster", source: "wx",
+      paint: { "raster-opacity": +$("opacity").value, "raster-fade-duration": 0 } }, "labels");
+
+    if (current === "radar") {
+      $("valid").textContent = "";
+      $("hourLabel").textContent = "";
+    } else {
+      const valid = new Date(new Date(manifest.gfs.cycle_time).getTime() + hour * 3600e3);
+      $("hourLabel").textContent = "+" + hour + "h";
+      $("valid").textContent = "Valid " + fmtTime(valid);
+    }
+    legend(meta);
+    document.querySelectorAll("#layers button").forEach(b => b.setAttribute("aria-pressed", b.dataset.id === current));
+  }
+
+  function legend(meta) {
+    const ramp = meta.ramp, lo = ramp[0][0], hi = ramp[ramp.length - 1][0];
+    const stops = ramp.map(([v, c]) => `${c} ${((v - lo) / (hi - lo) * 100).toFixed(1)}%`);
+    $("bar").style.background = `linear-gradient(to right, ${stops.join(", ")})`;
+    const mid = ramp[Math.floor(ramp.length / 2)][0];
+    $("ticks").innerHTML = [lo, mid, hi].map(v => `<span>${v}</span>`).join("") ;
+    $("ticks").lastElementChild.textContent += " " + meta.units;
+  }
+
+  function metaPanel() {
+    const rows = [];
+    if (manifest.gfs) {
+      rows.push(`GFS cycle ${fmtTime(new Date(manifest.gfs.cycle_time))}`);
+      rows.push(`Source ${new URL(manifest.gfs.source).hostname}`);
+    }
+    if (manifest.radar) rows.push(`Radar scan ${fmtTime(new Date(manifest.radar.scan_time))}`);
+    const failed = (manifest.qc || []).filter(q => !q.ok);
+    rows.push(failed.length
+      ? `<span class="bad">QC: ${failed.length} check(s) failed, previous run kept</span>`
+      : `<span class="ok">QC: ${(manifest.qc || []).length} checks passed</span>`);
+    rows.push(`Built ${fmtTime(new Date(manifest.generated_at))}`);
+    $("meta").innerHTML = rows.map(r => `<div>${r}</div>`).join("");
+  }
+
+  for (const id of order) {
+    const b = document.createElement("button");
+    b.dataset.id = id;
+    b.textContent = manifest.layers[id] ? manifest.layers[id].name : id + " (unavailable)";
+    b.disabled = !manifest.layers[id];
+    b.onclick = () => {
+      current = id;
+      show();
+      // Regional layers (radar) zoom to their coverage; global ones keep the current view.
+      const bb = manifest.layers[id].bounds;
+      if (bb && bb[2] - bb[0] < 300) map.fitBounds([[bb[0], bb[1]], [bb[2], bb[3]]], { padding: 40, duration: 600 });
+    };
+    $("layers").appendChild(b);
+  }
+  $("hour").oninput = show;
+  $("opacity").oninput = e => map.getLayer("wx") && map.setPaintProperty("wx", "raster-opacity", +e.target.value);
+  $("toggle").onclick = () => {
+    const c = $("panel").classList.toggle("collapsed");
+    $("toggle").textContent = c ? "show" : "hide";
+  };
+  metaPanel();
+  map.on("load", show);
+})();
+</script>
+</body>
+</html>

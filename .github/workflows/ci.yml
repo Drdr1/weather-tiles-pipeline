@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  # Pulls a real GFS cycle and MRMS scan from NOAA's AWS Open Data buckets
+  # and checks the whole chain end to end. Catches upstream format changes.
+  live-smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      WTP_DATA_DIR: data
+      WTP_FORECAST_HOURS: "0,6"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -e .
+      - run: python -m pipeline.run
+      - name: Check manifest and render a tile
+        run: |
+          python - <<'EOF'
+          import json
+          from pipeline.config import ALL_LAYERS
+          from pipeline.render import render_tile
+          m = json.load(open("data/manifest.json"))
+          print(json.dumps(m["status"], indent=2))
+          assert m["gfs"], "no GFS cycle published"
+          assert all(q["ok"] for q in m["qc"]), m["qc"]
+          for layer_id, meta in m["layers"].items():
+              for hour, rel in meta["hours"].items():
+                  png = render_tile(f"data/{rel}", ALL_LAYERS[layer_id], 0, 0, 0)
+                  assert png and len(png) > 100, (layer_id, hour)
+                  print("ok", layer_id, hour, len(png), "bytes")
+          EOF
+      - run: python -m pipeline.export --out site --max-zoom 2
+      - uses: actions/upload-artifact@v4
+        with: { name: live-smoke-site, path: site, retention-days: 3 }
