@@ -76,11 +76,11 @@
     style: {
       version: 8,
       sources: {
-        base: { type: "raster", tileSize: 256,
-          tiles: ["https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png"],
-          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>' },
-        labels: { type: "raster", tileSize: 256,
-          tiles: ["https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png"] }
+        base: { type: "raster", tileSize: 256, maxzoom: 16,
+          tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"],
+          attribution: 'Basemap © <a href="https://www.esri.com/">Esri</a>, HERE, Garmin, © OpenStreetMap contributors' },
+        labels: { type: "raster", tileSize: 256, maxzoom: 16,
+          tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}"] }
       },
       layers: [
         { id: "base", type: "raster", source: "base" },

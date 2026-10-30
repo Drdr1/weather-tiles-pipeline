@@ -112,7 +112,7 @@ asserts QC passes and renders a tile from every layer, which catches upstream fo
 - **Not included:** satellite imagery (GOES/Himawari) and AI weather models (GraphCast, Pangu, FourCastNet). Both would be new `Layer` sources feeding the same COG → tile path.
 - **Static demo resolution:** tiles are pre-rendered to zoom 4 and overzoomed beyond it. That's fine for 0.25° GFS but softens radar detail. The Docker stack renders at any zoom.
 - **Radar freshness on the demo:** the radar layer is a snapshot taken at build time (every 6 h). The Docker stack refreshes it every 10 minutes.
-- **Basemap:** CARTO raster tiles, used under their free-usage terms with attribution.
+- **Basemap:** Esri World Dark Gray canvas tiles (no API key), with attribution.
 
 Data: NOAA GFS and MRMS via the [NOAA Open Data Dissemination program](https://registry.opendata.aws/collab/noaa/) on AWS.
 
